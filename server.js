@@ -6,6 +6,9 @@ import fs from 'fs';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 
+// ================================
+// Express Setup
+// ================================
 const app = express();
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 app.use(express.json());
@@ -14,25 +17,65 @@ app.use(fileUpload());
 const uploadDir = './uploads';
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
+// ================================
+// WhatsApp Client (Headless Puppeteer)
+// ================================
 const client = new Client({
   authStrategy: new LocalAuth(),
-  puppeteer: { headless: false, args: ['--no-sandbox'] }
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
+    ],
+  },
 });
 
 let qrCode = '';
 let isReady = false;
 
-client.on('qr', qr => { qrCode = qr; console.log('QR generated'); });
-client.on('ready', () => { isReady = true; console.log('WhatsApp Ready!'); });
+client.on('qr', qr => {
+  qrCode = qr;
+  console.log('QR generated');
+});
+
+client.on('ready', () => {
+  isReady = true;
+  console.log('WhatsApp Ready!');
+});
+
+client.on('auth_failure', msg => {
+  console.log('Auth failure', msg);
+});
+
+client.on('disconnected', reason => {
+  console.log('Client disconnected', reason);
+});
+
 client.initialize();
 
-app.get('/qr', (req, res) => res.json({ qr: qrCode, ready: isReady }));
+// ================================
+// API Routes
+// ================================
 
+// Get QR code for login
+app.get('/qr', (req, res) => {
+  res.json({ qr: qrCode, ready: isReady });
+});
+
+// Send bulk messages
 app.post('/send-bulk', (req, res) => {
   if (!isReady) return res.json({ error: "WhatsApp not connected" });
 
   const message = req.body.message;
   const csvFile = req.files?.file;
+
   if (!csvFile) return res.status(400).json({ error: "CSV file required" });
 
   const tempPath = `${uploadDir}/${Date.now()}.csv`;
@@ -42,13 +85,9 @@ app.post('/send-bulk', (req, res) => {
 
   fs.createReadStream(tempPath)
     .pipe(csv())
-    .on('data', (row) => {
-      // Row ke andar jo bhi column ka naam hai... extract number automatically
+    .on('data', row => {
       const columnNames = Object.keys(row);
-
-      // pehli column ka value → phone number
-      const phone = row[columnNames[0]]?.trim();
-
+      const phone = row[columnNames[0]]?.trim(); // First column = number
       if (phone) numbers.push(phone);
     })
     .on('end', async () => {
@@ -57,7 +96,7 @@ app.post('/send-bulk', (req, res) => {
       for (let number of numbers) {
         try {
           await client.sendMessage(number + "@c.us", message);
-          await new Promise(r => setTimeout(r, 15000));
+          await new Promise(r => setTimeout(r, 15000)); // 15s delay for safety
         } catch (err) {
           console.log("Failed =>", number, err);
         }
@@ -68,5 +107,8 @@ app.post('/send-bulk', (req, res) => {
     });
 });
 
-
-app.listen(5000, () => console.log('Backend running on port 5000'));
+// ================================
+// Start Server
+// ================================
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
