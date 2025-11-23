@@ -105,7 +105,18 @@ app.post('/send-bulk', (req, res) => {
       fs.unlinkSync(tempPath);
       res.json({ status: "Bulk sending completed" });
     });
+    
 });
+app.post('/logout', async (req, res) => {
+  try {
+    await client.destroy(); // destroys session
+    initializeClient(); // create new client for fresh QR
+    res.json({ status: "Logged out, new QR generated" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to logout" });
+  }
+});
+
 
 // ================================
 // Start Server
