@@ -1,20 +1,22 @@
 {
   "name": "whatsapp-backend",
   "version": "1.0.0",
-  "description": "WhatsApp Bulk Sender Backend using whatsapp-web.js",
-  "main": "server.js",
-  "type": "module",
-  "scripts": {
+  "main": "index.js",
+ "scripts": {
     "start": "node server.js",
     "postinstall": "apt-get update && apt-get install -y gconf-service libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libnss3 lsb-release xdg-utils wget"
   },
-  "author": "Muskan Nisar",
+
+  "keywords": [],
+  "author": "",
   "license": "ISC",
   "dependencies": {
-    "csv-parser": "^3.0.0",
-    "express": "^4.18.2",
-    "express-fileupload": "^1.4.0",
-    "whatsapp-web.js": "^1.20.0",
-    "cors": "^2.8.5"
-  }
+    "cors": "^2.8.5",
+    "csv-parser": "^3.2.0",
+    "express": "^5.1.0",
+    "express-fileupload": "^1.5.2",
+    "puppeteer": "^24.31.0",
+    "whatsapp-web.js": "^1.34.2"
+  },
+  "description": ""
 }
