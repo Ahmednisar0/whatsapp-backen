@@ -23,22 +23,23 @@ const clients = {}; // key: userId, value: { client, qrCode, isReady }
 function initializeClient(userId) {
   if (clients[userId]) return clients[userId]; // Already exists
 
-  const client = new Client({
-    authStrategy: new LocalAuth({ clientId: userId }),
-    puppeteer: {
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-      ],
-    },
-  });
+ const client = new Client({
+  authStrategy: new LocalAuth({ clientId: userId }),
+  puppeteer: {
+    headless: true,
+    executablePath: "/usr/bin/google-chrome", // or chromium
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
+    ],
+  },
+});
 
   clients[userId] = { client, qrCode: '', isReady: false };
 
