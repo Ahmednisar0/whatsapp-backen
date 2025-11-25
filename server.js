@@ -4,8 +4,6 @@ import fileUpload from 'express-fileupload';
 import csv from 'csv-parser';
 import fs from 'fs';
 import pkg from 'whatsapp-web.js';
-import jwt from 'jsonwebtoken';
-
 const { Client, LocalAuth } = pkg;
 
 const app = express();
@@ -16,25 +14,14 @@ app.use(fileUpload());
 const uploadDir = './uploads';
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-// In-memory storage of clients
-const clients = {};
+// ================================
+// Store clients per user
+// ================================
+const clients = {}; // key: userId, value: { client, qrCode, isReady }
 
-// JWT auth middleware
-const authMiddleware = (req, res, next) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ error: "Unauthorized" });
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.id;
-    next();
-  } catch {
-    res.status(401).json({ error: "Unauthorized" });
-  }
-};
-
-// Initialize WhatsApp client for a user
-function initClient(userId) {
-  if (clients[userId]) return clients[userId];
+// Function to initialize a client for a user
+function initializeClient(userId) {
+  if (clients[userId]) return clients[userId]; // Already exists
 
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: userId }),
@@ -53,48 +40,48 @@ function initClient(userId) {
     },
   });
 
-  const clientData = { client, qr: '', ready: false };
-  clients[userId] = clientData;
+  clients[userId] = { client, qrCode: '', isReady: false };
 
   client.on('qr', qr => {
-    clientData.qr = qr;
+    clients[userId].qrCode = qr;
     console.log(`QR generated for user ${userId}`);
   });
 
   client.on('ready', () => {
-    clientData.ready = true;
-    console.log(`WhatsApp ready for user ${userId}`);
+    clients[userId].isReady = true;
+    console.log(`WhatsApp Ready for user ${userId}`);
   });
 
   client.on('auth_failure', msg => {
-    console.log(`Auth failure for user ${userId}:`, msg);
+    console.log(`Auth failure for user ${userId}`, msg);
   });
 
   client.on('disconnected', reason => {
-    console.log(`Client disconnected for user ${userId}:`, reason);
-    delete clients[userId];
+    console.log(`Client disconnected for user ${userId}`, reason);
+    delete clients[userId]; // remove session
   });
 
   client.initialize();
-  return clientData;
+
+  return clients[userId];
 }
 
 // ================================
-// Routes
+// API Routes
 // ================================
 
-// Get QR code for user
-app.get('/qr', authMiddleware, (req, res) => {
-  const userId = req.userId;
-  const clientData = initClient(userId);
-  res.json({ qr: clientData.qr, ready: clientData.ready });
+// Get QR code for login
+app.get('/qr/:userId', (req, res) => {
+  const userId = req.params.userId;
+  const session = initializeClient(userId);
+  res.json({ qr: session.qrCode, ready: session.isReady });
 });
 
 // Send bulk messages
-app.post('/send-bulk', authMiddleware, (req, res) => {
-  const userId = req.userId;
-  const clientData = clients[userId];
-  if (!clientData || !clientData.ready) return res.status(400).json({ error: "WhatsApp not connected" });
+app.post('/send-bulk/:userId', (req, res) => {
+  const userId = req.params.userId;
+  const session = clients[userId];
+  if (!session || !session.isReady) return res.json({ error: "WhatsApp not connected" });
 
   const message = req.body.message;
   const csvFile = req.files?.file;
@@ -104,21 +91,21 @@ app.post('/send-bulk', authMiddleware, (req, res) => {
   fs.writeFileSync(tempPath, csvFile.data);
 
   const numbers = [];
-
   fs.createReadStream(tempPath)
     .pipe(csv())
     .on('data', row => {
       const columnNames = Object.keys(row);
-      const phone = row[columnNames[0]]?.trim();
+      const phone = row[columnNames[0]]?.trim(); // First column = number
       if (phone) numbers.push(phone);
     })
     .on('end', async () => {
+      console.log("Numbers to send:", numbers);
       for (let number of numbers) {
         try {
-          await clientData.client.sendMessage(number + "@c.us", message);
-          await new Promise(r => setTimeout(r, 15000));
+          await session.client.sendMessage(number + "@c.us", message);
+          await new Promise(r => setTimeout(r, 15000)); // 15s delay
         } catch (err) {
-          console.log(`Failed => ${number}`, err);
+          console.log("Failed =>", number, err);
         }
       }
       fs.unlinkSync(tempPath);
@@ -126,20 +113,23 @@ app.post('/send-bulk', authMiddleware, (req, res) => {
     });
 });
 
-// Logout
-app.post('/logout', authMiddleware, async (req, res) => {
-  const userId = req.userId;
-  const clientData = clients[userId];
-  if (!clientData) return res.status(400).json({ error: "No session found" });
+// Logout user
+app.post('/logout/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  const session = clients[userId];
+  if (!session) return res.status(400).json({ error: "No session found" });
 
   try {
-    await clientData.client.destroy();
+    await session.client.destroy();
     delete clients[userId];
-    res.json({ status: "Logged out, new QR will be generated on next request" });
+    res.json({ status: "Logged out" });
   } catch (err) {
     res.status(500).json({ error: "Failed to logout" });
   }
 });
 
+// ================================
+// Start Server
+// ================================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`WhatsApp backend running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
