@@ -27,7 +27,7 @@ function initializeClient(userId) {
   authStrategy: new LocalAuth({ clientId: userId }),
   puppeteer: {
     headless: true,
-    executablePath: "/usr/bin/google-chrome", // or chromium
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH, // or chromium
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
