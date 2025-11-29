@@ -15,7 +15,23 @@ app.use(fileUpload());
 const uploadDir = './uploads';
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-const clients = {}; // key: userId, value: { client, qrCode, isReady }
+const client = new Client({
+  authStrategy: new LocalAuth({ clientId: userId }),
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
+    ],
+  },
+});
+ // key: userId, value: { client, qrCode, isReady }
 
 // Initialize WA Client
 async function initializeClient(userId) {
