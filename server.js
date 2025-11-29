@@ -4,6 +4,7 @@ import fileUpload from 'express-fileupload';
 import csv from 'csv-parser';
 import fs from 'fs';
 import pkg from 'whatsapp-web.js';
+import chromium from "chrome-aws-lambda"; // ⭐ ADDED
 const { Client, LocalAuth } = pkg;
 
 const app = express();
@@ -14,32 +15,20 @@ app.use(fileUpload());
 const uploadDir = './uploads';
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-// ================================
-// Store clients per user
-// ================================
 const clients = {}; // key: userId, value: { client, qrCode, isReady }
 
-// Function to initialize a client for a user
-function initializeClient(userId) {
-  if (clients[userId]) return clients[userId]; // Already exists
+// Initialize WA Client
+async function initializeClient(userId) {
+  if (clients[userId]) return clients[userId];
 
- const client = new Client({
-  authStrategy: new LocalAuth({ clientId: userId }),
-  puppeteer: {
-    headless: true,
-    executablePath: "/usr/bin/chromium",
-     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu',
-    ],
-  },
-});
+  const client = new Client({
+    authStrategy: new LocalAuth({ clientId: userId }),
+    puppeteer: {
+      headless: true,
+      executablePath: await chromium.executablePath,  // ⭐ FIXED
+      args: chromium.args,                           // ⭐ FIXED
+    },
+  });
 
   clients[userId] = { client, qrCode: '', isReady: false };
 
@@ -59,11 +48,10 @@ function initializeClient(userId) {
 
   client.on('disconnected', reason => {
     console.log(`Client disconnected for user ${userId}`, reason);
-    delete clients[userId]; // remove session
+    delete clients[userId];
   });
 
   client.initialize();
-
   return clients[userId];
 }
 
@@ -71,14 +59,12 @@ function initializeClient(userId) {
 // API Routes
 // ================================
 
-// Get QR code for login
-app.get('/qr/:userId', (req, res) => {
+app.get('/qr/:userId', async (req, res) => {
   const userId = req.params.userId;
-  const session = initializeClient(userId);
+  const session = await initializeClient(userId);
   res.json({ qr: session.qrCode, ready: session.isReady });
 });
 
-// Send bulk messages
 app.post('/send-bulk/:userId', (req, res) => {
   const userId = req.params.userId;
   const session = clients[userId];
@@ -96,15 +82,14 @@ app.post('/send-bulk/:userId', (req, res) => {
     .pipe(csv())
     .on('data', row => {
       const columnNames = Object.keys(row);
-      const phone = row[columnNames[0]]?.trim(); // First column = number
+      const phone = row[columnNames[0]]?.trim();
       if (phone) numbers.push(phone);
     })
     .on('end', async () => {
-      console.log("Numbers to send:", numbers);
       for (let number of numbers) {
         try {
           await session.client.sendMessage(number + "@c.us", message);
-          await new Promise(r => setTimeout(r, 15000)); // 15s delay
+          await new Promise(r => setTimeout(r, 15000));
         } catch (err) {
           console.log("Failed =>", number, err);
         }
@@ -114,7 +99,6 @@ app.post('/send-bulk/:userId', (req, res) => {
     });
 });
 
-// Logout user
 app.post('/logout/:userId', async (req, res) => {
   const userId = req.params.userId;
   const session = clients[userId];
@@ -129,8 +113,5 @@ app.post('/logout/:userId', async (req, res) => {
   }
 });
 
-// ================================
-// Start Server
-// ================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
