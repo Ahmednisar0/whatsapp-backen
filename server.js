@@ -37,14 +37,8 @@ const client = new Client({
 async function initializeClient(userId) {
   if (clients[userId]) return clients[userId];
 
-  const client = new Client({
-    authStrategy: new LocalAuth({ clientId: userId }),
-    puppeteer: {
-      headless: true,
-      executablePath: await chromium.executablePath,  // ⭐ FIXED
-      args: chromium.args,                           // ⭐ FIXED
-    },
-  });
+const clients = {};
+
 
   clients[userId] = { client, qrCode: '', isReady: false };
 
