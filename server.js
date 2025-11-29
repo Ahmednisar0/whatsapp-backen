@@ -4,7 +4,8 @@ import fileUpload from 'express-fileupload';
 import csv from 'csv-parser';
 import fs from 'fs';
 import pkg from 'whatsapp-web.js';
-import chromium from "chrome-aws-lambda"; // ⭐ ADDED
+import chromium from "chrome-aws-lambda";
+
 const { Client, LocalAuth } = pkg;
 
 const app = express();
@@ -12,52 +13,41 @@ app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
 app.use(express.json());
 app.use(fileUpload());
 
+// Store all user sessions
+const clients = {};
+
 const uploadDir = './uploads';
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-const client = new Client({
-  authStrategy: new LocalAuth({ clientId: userId }),
-  puppeteer: {
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu',
-    ],
-  },
-});
- // key: userId, value: { client, qrCode, isReady }
-
-// Initialize WA Client
+// =======================
+// Create WA Client Per User
+// =======================
 async function initializeClient(userId) {
   if (clients[userId]) return clients[userId];
 
-const clients = {};
-
+  const client = new Client({
+    authStrategy: new LocalAuth({ clientId: userId }),
+    puppeteer: {
+      headless: true,
+      executablePath: await chromium.executablePath,
+      args: chromium.args,
+    }
+  });
 
   clients[userId] = { client, qrCode: '', isReady: false };
 
   client.on('qr', qr => {
     clients[userId].qrCode = qr;
-    console.log(`QR generated for user ${userId}`);
+    console.log("QR Generated:", userId);
   });
 
   client.on('ready', () => {
     clients[userId].isReady = true;
-    console.log(`WhatsApp Ready for user ${userId}`);
+    console.log("READY:", userId);
   });
 
-  client.on('auth_failure', msg => {
-    console.log(`Auth failure for user ${userId}`, msg);
-  });
-
-  client.on('disconnected', reason => {
-    console.log(`Client disconnected for user ${userId}`, reason);
+  client.on('disconnected', () => {
+    console.log("DISCONNECTED:", userId);
     delete clients[userId];
   });
 
@@ -65,20 +55,28 @@ const clients = {};
   return clients[userId];
 }
 
-// ================================
-// API Routes
-// ================================
+// =======================
+// API
+// =======================
 
+// Return QR Code
 app.get('/qr/:userId', async (req, res) => {
   const userId = req.params.userId;
   const session = await initializeClient(userId);
-  res.json({ qr: session.qrCode, ready: session.isReady });
+
+  res.json({
+    qr: session.qrCode,
+    ready: session.isReady
+  });
 });
 
+// Bulk Message Sender
 app.post('/send-bulk/:userId', (req, res) => {
   const userId = req.params.userId;
   const session = clients[userId];
-  if (!session || !session.isReady) return res.json({ error: "WhatsApp not connected" });
+
+  if (!session || !session.isReady)
+    return res.json({ error: "WhatsApp not connected" });
 
   const message = req.body.message;
   const csvFile = req.files?.file;
@@ -88,30 +86,34 @@ app.post('/send-bulk/:userId', (req, res) => {
   fs.writeFileSync(tempPath, csvFile.data);
 
   const numbers = [];
+
   fs.createReadStream(tempPath)
     .pipe(csv())
     .on('data', row => {
-      const columnNames = Object.keys(row);
-      const phone = row[columnNames[0]]?.trim();
+      const col = Object.keys(row)[0];
+      const phone = row[col]?.trim();
       if (phone) numbers.push(phone);
     })
     .on('end', async () => {
       for (let number of numbers) {
         try {
           await session.client.sendMessage(number + "@c.us", message);
-          await new Promise(r => setTimeout(r, 15000));
+          await new Promise(r => setTimeout(r, 5000)); // 5 sec delay
         } catch (err) {
-          console.log("Failed =>", number, err);
+          console.log("Failed:", number, err);
         }
       }
+
       fs.unlinkSync(tempPath);
-      res.json({ status: "Bulk sending completed" });
+      res.json({ status: "Bulk messages sent!" });
     });
 });
 
+// Logout User
 app.post('/logout/:userId', async (req, res) => {
   const userId = req.params.userId;
   const session = clients[userId];
+
   if (!session) return res.status(400).json({ error: "No session found" });
 
   try {
@@ -123,5 +125,5 @@ app.post('/logout/:userId', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+const PORT = 5000;
+app.listen(PORT, () => console.log("Server running on port " + PORT));
